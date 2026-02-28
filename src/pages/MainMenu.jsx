@@ -34,6 +34,16 @@ const games = [
   { path: '/reversi', icon: '⚫', title: 'Reversi', desc: 'Othello board game vs AI', color: '#69f0ae' },
   { path: '/doodlejump', icon: '🦘', title: 'Doodle Jump', desc: 'Endless vertical platformer', color: '#b9f6ca' },
   { path: '/reactiontest', icon: '⚡', title: 'Reaction Time', desc: 'Test your reflexes', color: '#ffd740' },
+  { path: '/motocross', icon: '🏍️', title: 'Motocross', desc: 'Physics 2D motorcycle platformer', color: '#ff7043' },
+  { path: '/gravityshooter', icon: '🔫', title: 'Gravity Shooter', desc: 'Up to 4P low-gravity arena', color: '#7c4dff' },
+  { path: '/supermario', icon: '🍄', title: 'Super Mario', desc: 'Classic platformer adventure', color: '#e53935' },
+  { path: '/pool', icon: '🎱', title: '8-Ball Pool', desc: 'Billiards vs AI or 2P', color: '#1b5e20' },
+  { path: '/pacman', icon: '👻', title: 'Pac-Man', desc: 'Eat dots, avoid ghosts', color: '#fdd835' },
+  { path: '/fruitninja', icon: '🍉', title: 'Fruit Ninja', desc: 'Slice fruit, dodge bombs', color: '#e91e63' },
+  { path: '/bomberman', icon: '💥', title: 'Bomberman', desc: 'Bomb your way through', color: '#ff6f00' },
+  { path: '/geometrydash', icon: '▶️', title: 'Geometry Dash', desc: 'Rhythm-based platformer', color: '#00e5ff' },
+  { path: '/candycrush', icon: '🍬', title: 'Candy Crush', desc: 'Match-3 puzzle game', color: '#ce93d8' },
+  { path: '/agario', icon: '🟢', title: 'Agar.io', desc: 'Eat cells, grow bigger', color: '#80deea' },
 ];
 
 export default function MainMenu() {

@@ -244,6 +244,7 @@ const ANIM_MS = 350;
 const ROOM_PREFIX = 'arcadechess_';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function genCode(n = 6) { let s = ''; for (let i = 0; i < n; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
+const SESSION_KEY = 'chess_online_session';
 
 const DIFFICULTY = [
   { label: 'Beginner', depth: 1 },
@@ -288,6 +289,9 @@ export default function Chess() {
   const [connected, setConnected] = useState(false);
   const [peerErr, setPeerErr] = useState('');
   const [oppDisconnected, setOppDisconnected] = useState(false);
+  const [savedSession, setSavedSession] = useState(() => {
+    try { const s = sessionStorage.getItem(SESSION_KEY); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
 
   /* animation */
   const [anim, setAnim] = useState(null);
@@ -380,11 +384,23 @@ export default function Chess() {
 
   const wireConn = useCallback((conn) => {
     connRef.current = conn;
-    conn.on('open', () => { setConnected(true); setOlPhase('playing'); });
+    conn.on('open', () => { setConnected(true); setOlPhase('playing'); setOppDisconnected(false); });
     conn.on('data', (data) => {
       if (data.type === 'init') { setPlayerColor(data.hostColor === 'w' ? 'b' : 'w'); setOlPhase('playing'); }
       if (data.type === 'move') { applyMoveRef.current(boardRef.current, castleRef.current, epRef.current, data.move); }
       if (data.type === 'resign') { setStatus('opponent_resigned'); }
+      if (data.type === 'sync') {
+        const gs = data.gameState;
+        if (gs) {
+          setBoard(gs.board); setCastle(gs.castle); setEnPassant(gs.enPassant);
+          setTurn(gs.turn); setCapturedByW(gs.capturedByW || []); setCapturedByB(gs.capturedByB || []);
+          setMoveHistory(gs.moveHistory || []); setStatus(gs.status || 'playing');
+          setLastMove(gs.lastMove); setHistory(gs.history || [{ board: initialBoard(), lastMove: null }]);
+          setViewIdx(gs.viewIdx || 0);
+          boardRef.current = gs.board; castleRef.current = gs.castle;
+          epRef.current = gs.enPassant; turnRef.current = gs.turn;
+        }
+      }
       if (data.type === 'rematch') {
         setBoard(initialBoard()); setCastle(initialCastle()); setEnPassant(-1); setTurn('w');
         setSelected(null); setLegalForSelected([]); setStatus('playing');
@@ -397,21 +413,30 @@ export default function Chess() {
     conn.on('close', () => { setOppDisconnected(true); setConnected(false); });
   }, []);
 
-  const createRoom = () => {
+  const createRoom = (codeOverride) => {
     cleanupPeer();
-    const code = genCode();
+    const code = codeOverride || genCode();
     setRoomCode(code); setOlPhase('hosting'); setPeerErr('');
     const peer = new Peer(ROOM_PREFIX + code);
     peerRef.current = peer;
-    peer.on('error', (err) => setPeerErr(err.type === 'unavailable-id' ? 'Code taken — try again' : `Error: ${err.type}`));
+    peer.on('error', (err) => setPeerErr(err.type === 'unavailable-id' ? 'Code taken — retry in a moment' : `Error: ${err.type}`));
     peer.on('connection', (conn) => {
       wireConn(conn);
-      conn.on('open', () => conn.send({ type: 'init', hostColor: playerColor }));
+      conn.on('open', () => {
+        conn.send({ type: 'init', hostColor: playerColor });
+        const sess = { roomCode: code, playerColor, role: 'host' };
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+        setSavedSession(sess);
+        try {
+          const raw = sessionStorage.getItem(SESSION_KEY + '_state');
+          if (raw && codeOverride) conn.send({ type: 'sync', gameState: JSON.parse(raw) });
+        } catch {}
+      });
     });
   };
 
-  const joinRoom = () => {
-    const code = joinInput.toUpperCase().trim();
+  const joinRoom = (codeOverride) => {
+    const code = (codeOverride || joinInput).toUpperCase().trim();
     if (code.length < 4) { setPeerErr('Enter a valid room code'); return; }
     cleanupPeer();
     setPeerErr(''); setOlPhase('joining');
@@ -421,6 +446,11 @@ export default function Chess() {
       const conn = peer.connect(ROOM_PREFIX + code);
       wireConn(conn);
       setRoomCode(code);
+      conn.on('open', () => {
+        const sess = { roomCode: code, playerColor, role: 'joiner' };
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(sess));
+        setSavedSession(sess);
+      });
     });
     peer.on('error', (err) => { setPeerErr(err.type === 'peer-unavailable' ? 'Room not found' : `Error: ${err.type}`); setOlPhase('menu'); });
   };
@@ -433,6 +463,40 @@ export default function Chess() {
   };
 
   useEffect(() => { return () => cleanupPeer(); }, [cleanupPeer]);
+
+  /* ─── save game state for online reconnection ─── */
+  useEffect(() => {
+    if (mode === 'online' && olPhase === 'playing') {
+      try {
+        sessionStorage.setItem(SESSION_KEY + '_state', JSON.stringify({
+          board, castle, enPassant, turn, capturedByW, capturedByB,
+          moveHistory, status, lastMove, history, viewIdx
+        }));
+      } catch {}
+    }
+  }, [mode, olPhase, board, castle, enPassant, turn, capturedByW, capturedByB, moveHistory, status, lastMove, history, viewIdx]);
+
+  const rejoinRoom = () => {
+    if (!savedSession) return;
+    setMode('online');
+    setPlayerColor(savedSession.playerColor);
+    setRoomCode(savedSession.roomCode);
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY + '_state');
+      if (raw) {
+        const gs = JSON.parse(raw);
+        setBoard(gs.board); setCastle(gs.castle); setEnPassant(gs.enPassant);
+        setTurn(gs.turn); setCapturedByW(gs.capturedByW || []); setCapturedByB(gs.capturedByB || []);
+        setMoveHistory(gs.moveHistory || []); setStatus(gs.status || 'playing');
+        setLastMove(gs.lastMove); setHistory(gs.history || [{ board: initialBoard(), lastMove: null }]);
+        setViewIdx(gs.viewIdx || 0);
+        boardRef.current = gs.board; castleRef.current = gs.castle;
+        epRef.current = gs.enPassant; turnRef.current = gs.turn;
+      }
+    } catch {}
+    if (savedSession.role === 'host') createRoom(savedSession.roomCode);
+    else joinRoom(savedSession.roomCode);
+  };
 
   /* ─── history nav ─── */
   const goBack = () => setViewIdx(v => Math.max(0, v - 1));
@@ -491,6 +555,12 @@ export default function Chess() {
               <span className="chess-mode-icon">🌐</span>
               <span>Play Online</span>
             </button>
+            {savedSession && (
+              <button onClick={rejoinRoom}>
+                <span className="chess-mode-icon">🔄</span>
+                <span>Rejoin ({savedSession.roomCode})</span>
+              </button>
+            )}
           </div>
         </div>
         <BackButton />
@@ -696,7 +766,7 @@ export default function Chess() {
           <p>{status === 'checkmate' ? 'Checkmate' : status === 'stalemate' ? 'Stalemate' : 'Resignation'}</p>
           {mode === 'ai' && <button onClick={() => resetGame()}>Play Again</button>}
           {mode === 'online' && connected && <button onClick={sendRematch}>Rematch</button>}
-          <button onClick={() => { cleanupPeer(); setMode(null); }}>Main Menu</button>
+          <button onClick={() => { cleanupPeer(); sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(SESSION_KEY + '_state'); setSavedSession(null); setMode(null); }}>Main Menu</button>
         </div>
       )}
 
